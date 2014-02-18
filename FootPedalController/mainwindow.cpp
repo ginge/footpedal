@@ -36,19 +36,20 @@ MainWindow::MainWindow(QWidget *parent) :
 {
     ui->setupUi(this);
 
-
+    // create and add the key tab boxes
     pressButtonWidget = new KeyDisplayForm();
     releaseButtonWidget = new KeyDisplayForm();
 
     ui->tabWidget->addTab(pressButtonWidget, "When Button is Pressed");
     ui->tabWidget->addTab(releaseButtonWidget, "When Button is Released");
 
+    // load the terminal
     console = new Console;
     console->setEnabled(false);
-    //setCentralWidget(console);
 
     ui->gridLayout->addWidget(console);
 
+    // setup the serial port
     serial = new QSerialPort(this);
 
     foreach (const QSerialPortInfo &info, QSerialPortInfo::availablePorts())
@@ -56,6 +57,12 @@ MainWindow::MainWindow(QWidget *parent) :
 
     packetHandler = new PacketHandler();
 
+    // Add commands
+    ui->dropCmdType->addItem("Press and Release", CMD_BUTTON1);
+    ui->dropCmdType->addItem("Press and Hold", CMD_BUTTON_ON_PRESS);
+    ui->dropCmdType->addItem("Echo to USB serial", CMD_SERIAL_USB);
+
+    // do QT signals and slots
     connect(ui->btnConnect, SIGNAL(clicked()), this, SLOT(openSerialPort()));
     connect(ui->edtText, SIGNAL(returnPressed()), this, SLOT(sendSerial()));
     connect(serial, SIGNAL(error(QSerialPort::SerialPortError)), this, SLOT(handleError(QSerialPort::SerialPortError)));

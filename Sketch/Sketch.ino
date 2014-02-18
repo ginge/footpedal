@@ -89,8 +89,8 @@ struct {
   // change these lines below to have hard coded default key presses
   byte keyboardKeysPress[MAX_KEY_SEQ]        = {KEY_HOME, KEY_C, KEY_DELETE, KEY_V, 0};
   byte keyboardModifiersPress[MAX_KEY_SEQ]   = {KEY_LEFT_SHIFT, KEY_LEFT_CTRL, 0, KEY_LEFT_CTRL, 0};
-  byte keyboardKeysRelease[MAX_KEY_SEQ]      = {KEY_HOME, KEY_A, KEY_DELETE, KEY_V, 0};
-  byte keyboardModifiersRelease[MAX_KEY_SEQ] = {KEY_LEFT_SHIFT, KEY_LEFT_CTRL, 0, KEY_LEFT_CTRL};
+  byte keyboardKeysRelease[MAX_KEY_SEQ]      = {KEY_H, KEY_A, KEY_H, KEY_A, 0};
+  byte keyboardModifiersRelease[MAX_KEY_SEQ] = {0, 0, 0, 0};
   byte buttonCommand    = CMD_BUTTON1;       // function that is executed on button press
   byte potAxisCommand   = CMD_JOYSTICK_X;
   int  potSampleFreq    = 10;  //ms
@@ -498,5 +498,11 @@ void saveEEPROM() {
     // write the keypress contents in
     EEPROM.write(i, Conf.keyboardModifiersRelease[i-3*MAX_KEY_SEQ-1]);
   }
+  
+  // save ID
+  EEPROM.write(4*MAX_KEY_SEQ, Conf.ID);
+  
+  // save button command
+  EEPROM.write((4*MAX_KEY_SEQ)+1, Conf.buttonCommand);
 }
 
