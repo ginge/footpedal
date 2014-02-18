@@ -17,6 +17,28 @@ footpedal
   - You can have multiple masters... if you really want ?!?
 * configurable keys sequences and options from QT application
 
+Teensy config
+=============
+
+Pin setup:-
+
+GND           - Pushbutton (any pin)
+Digital 12    - Pushbutton (remaining pin)
+A0 (Analogue) - Potentiometer centre pin
+Pot end pin   - GND
+Pot other end - +3.3V
+
+--- to be documented!
+RX1           - Serial connector
+TX1
+RX2
+TX2
+
+
+TODO:
+Test multiple serial connected units.
+Add automatic ID system
+Add broadcast feature
 
 Model and more description at
 http://www.thingiverse.com/thing:249020
