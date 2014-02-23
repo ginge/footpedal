@@ -33,6 +33,23 @@ enum PACKET_FORMAT {
   DATA_LOC_A_1
 };
 
+enum PACKET_IDS {
+    ID_UNCONFIGURED_SLAVE  = 252,
+    ID_BROADCAST_CHAIN1,
+    ID_BROADCAST_CHAIN2,
+    ID_BROADCAST_BOTH
+};
+
+enum PacketCommandTypes {
+    CMD_JOYSTICK_X = 0,                  // We can send a joystick command
+    CMD_JOYSTICK_Y,                      // For X or Y
+    CMD_BUTTON1,                         // When the switch is pressed or released, we send some keystrokes
+    CMD_BUTTON2,                         // second button not implemented yet
+    CMD_SERIAL_USB,                      // button press send a serial command
+    CMD_BUTTON_ON_PRESS,                 // button press send a keystroke, and holds it down
+    CMD_BUTTON_ON_RELEASE
+};
+
 enum PacketCommands {
     CMD_CONFIGURE_ID = 30,
     CMD_CONFIGURE_BUT_CMD,
@@ -41,7 +58,9 @@ enum PacketCommands {
     CMD_CONFIGURE_BUT_KEY_RELEASE,
     CMD_CONFIGURE_BUT_MODIFIER_RELEASE,
     CMD_CONFIGURE_POT_CMD,
-    CMD_CONFIGURE_GET_KEYS_PRESS=50,
+    CMD_GET_ID = 50,
+    CMD_GET_BUT_CMD,
+    CMD_CONFIGURE_GET_KEYS_PRESS,
     CMD_CONFIGURE_GET_MODIFIERS_PRESS,
     CMD_CONFIGURE_GET_KEYS_RELEASE,
     CMD_CONFIGURE_GET_MODIFIERS_RELEASE,
@@ -54,13 +73,13 @@ class DataPacket
 {
 public:
     DataPacket();
-    char buffer[PACKET_SIZE];
-    int bytesReceived;
-    int nodeID;
-    int sourceID;
-    int command;
-    int payload;
-    int payloadExtra;
+    unsigned char buffer[PACKET_SIZE];
+    unsigned int bytesReceived;
+    u_int8_t nodeID;
+    u_int8_t sourceID;
+    u_int8_t command;
+    u_int16_t payload;
+    u_int16_t payloadExtra;
 };
 
 
@@ -71,6 +90,7 @@ class PacketHandler : public QObject
 public:
     PacketHandler();
     void sendPacket(DataPacket *packet);
+    DataPacket *sendPacket(int toNode, int fromNode, int command, int payload, int payloadExtra);
     void buildPacket(DataPacket *packet, char data);
     DataPacket *packetHandle();
 
@@ -81,10 +101,12 @@ signals:
     void gotKeyReleaseConfig(int idx, char key);
     void gotModifierReleaseConfig(int idx, char mod);
     void gotDebugMessage(QString message);
+    void gotDeviceID(unsigned int id);
+    void gotButtonMode(unsigned int mode);
 
 private:
     void processReceivedPacket(DataPacket *packet);
-    int arrToValue16(char *buffer, int offset);
+    u_int16_t arrToValue16(unsigned char *buffer, int offset);
 
     DataPacket serialPacket;
 

@@ -45,13 +45,25 @@ KeyDisplayForm::KeyDisplayForm(QWidget *parent) :
         ui->keysWidget->setColumnWidth(i, 45);
     }
 
+    updatingIndex = -1;
+
     connect(ui->btnAdd, SIGNAL(clicked()), this, SLOT(addToTable()));
     connect(ui->btnUpdate, SIGNAL(clicked()), this, SLOT(updateItem()));
     connect(ui->keysWidget, SIGNAL(cellClicked(int,int)), this, SLOT(cellClicked(int,int)));
+    connect(ui->btnClear, SIGNAL(clicked()), this, SLOT(clearTable()));
+    connect(ui->dropKeys, SIGNAL(currentIndexChanged(int)), this, SLOT(propertyChanged()));
+    connect(ui->chkAlt, SIGNAL(clicked()), this, SLOT(propertyChanged()));
+    connect(ui->chkAltR, SIGNAL(clicked()), this, SLOT(propertyChanged()));
+    connect(ui->chkCtrl, SIGNAL(clicked()), this, SLOT(propertyChanged()));
+    connect(ui->chkCtrlR, SIGNAL(clicked()), this, SLOT(propertyChanged()));
+    connect(ui->chkShift, SIGNAL(clicked()), this, SLOT(propertyChanged()));
+    connect(ui->chkShiftR, SIGNAL(clicked()), this, SLOT(propertyChanged()));
+    connect(ui->chkWin, SIGNAL(clicked()), this, SLOT(propertyChanged()));
+    connect(ui->chkWinR, SIGNAL(clicked()), this, SLOT(propertyChanged()));
 
     dropKeysInit();
 
-    updatingIndex = -1;
+
 }
 
 KeyDisplayForm::~KeyDisplayForm()
@@ -102,7 +114,7 @@ void KeyDisplayForm::addKey(int idx, char key)
     qDebug() << "Got a KEY! idx" << idx << " key " << key;
 
     // get the nice name for this key from the combobox (ugh)
-    for (int i = 0; i < ui->dropKeys->count(); ++i) {
+    for (int i = 1; i < ui->dropKeys->count(); ++i) {
         if (ui->dropKeys->itemData(i) == (int)key) {
             skey = ui->dropKeys->itemText(i);
             break;
@@ -113,6 +125,7 @@ void KeyDisplayForm::addKey(int idx, char key)
 
 void KeyDisplayForm::addModifier(int idx, char mod)
 {
+
     updateOrInsertTableRow(idx, NULL, -1, isBitSet(mod, KEY_CTRL), isBitSet(mod, KEY_ALT), isBitSet(mod, KEY_SHIFT),
                                           isBitSet(mod, KEY_GUI), isBitSet(mod, KEY_RIGHT_CTRL), isBitSet(mod, KEY_RIGHT_ALT),
                                           isBitSet(mod, KEY_RIGHT_SHIFT), isBitSet(mod, KEY_RIGHT_GUI));
@@ -123,18 +136,19 @@ void KeyDisplayForm::cellClicked(int row, int col)
 {
     col = col;
 
-    updatingIndex = row;
-
     // get the key code
     int code = ui->keysWidget->item(row, 2)->data(Qt::DisplayRole).toInt();
 
     // get the nice name for this key from the combobox (ugh)
     for (int i = 0; i < ui->dropKeys->count(); ++i) {
         if (ui->dropKeys->itemData(i) == code) {
+            updatingIndex = -1;
             ui->dropKeys->setCurrentIndex(i);
+            updatingIndex = row;
             break;
         }
     }
+
 
     ui->chkCtrl->setCheckState(ui->keysWidget->item(row, 3)->checkState());
     ui->chkAlt->setCheckState(ui->keysWidget->item(row, 4)->checkState());
@@ -144,22 +158,49 @@ void KeyDisplayForm::cellClicked(int row, int col)
     ui->chkAltR->setCheckState(ui->keysWidget->item(row, 8)->checkState());
     ui->chkShiftR->setCheckState(ui->keysWidget->item(row, 9)->checkState());
     ui->chkWinR->setCheckState(ui->keysWidget->item(row, 10)->checkState());
+
 }
 
 void KeyDisplayForm::addToTable()
 {
-    addTableRow(ui->dropKeys->currentText(), ui->dropKeys->itemData(ui->dropKeys->currentIndex()).toInt(), ui->chkCtrl->isChecked(), ui->chkAlt->isChecked(), ui->chkShift->isChecked(),
+    QString currentText = ui->dropKeys->currentText();
+
+    // if dropdown value is 0, we are clearing the row
+    if (ui->dropKeys->currentIndex() == 0)
+    {
+        currentText = "";
+    }
+
+    addTableRow(currentText, ui->dropKeys->itemData(ui->dropKeys->currentIndex()).toInt(), ui->chkCtrl->isChecked(), ui->chkAlt->isChecked(), ui->chkShift->isChecked(),
                 ui->chkWin->isChecked(), ui->chkCtrlR->isChecked(), ui->chkAltR->isChecked(), ui->chkShiftR->isChecked(), ui->chkWinR->isChecked());
 }
 
 void KeyDisplayForm::updateItem()
 {
+
     if (updatingIndex == -1)
         return;
 
-    updateOrInsertTableRow(updatingIndex, ui->dropKeys->currentText(), ui->dropKeys->itemData(ui->dropKeys->currentIndex()).toInt(), ui->chkCtrl->isChecked(), ui->chkAlt->isChecked(), ui->chkShift->isChecked(),
-                           ui->chkWin->isChecked(), ui->chkCtrlR->isChecked(), ui->chkAltR->isChecked(), ui->chkShiftR->isChecked(), ui->chkWinR->isChecked());
-    updatingIndex = -1;
+    QString currentText = ui->dropKeys->currentText();
+
+    // if dropdown value is 0, we are clearing the row
+    if (ui->dropKeys->currentIndex() == 0)
+    {
+        updateOrInsertTableRow(updatingIndex, "CLEAR", 0, false, false, false, false, false, false, false, false);
+        return;
+    }
+
+    bool ctrl  = ui->chkCtrl->isChecked();
+    bool alt   =  ui->chkAlt->isChecked();
+    bool shift = ui->chkShift->isChecked();
+    bool win   = ui->chkWin->isChecked();
+    bool ctrlR  = ui->chkCtrlR->isChecked();
+    bool altR   =  ui->chkAltR->isChecked();
+    bool shiftR = ui->chkShiftR->isChecked();
+    bool winR   = ui->chkWinR->isChecked();
+
+    updateOrInsertTableRow(updatingIndex, currentText, ui->dropKeys->itemData(ui->dropKeys->currentIndex()).toInt(), ctrl, alt, shift,
+                           win, ctrlR, altR, shiftR, winR);
 }
 
 void KeyDisplayForm::addTableRow(QString text, int code, bool ctrl, bool alt, bool shift, bool win, bool ctrlR, bool altR, bool shiftR, bool winR)
@@ -183,6 +224,7 @@ void KeyDisplayForm::updateOrInsertTableRow(int idx, QString text, int code, boo
 {
     int row = ui->keysWidget->rowCount();
 
+
     // check if the key exists
 
     // do an insert
@@ -196,7 +238,11 @@ void KeyDisplayForm::updateOrInsertTableRow(int idx, QString text, int code, boo
     ui->keysWidget->setItem(idx, 0, new QTableWidgetItem(QString::number(idx)));
     if (text != NULL)   // special case where we know only partial data, so leave existing
     {
-        ui->keysWidget->setItem(idx, 1, new QTableWidgetItem(text));
+        if (code == 0)  // means clear line
+            ui->keysWidget->setItem(idx, 1, new QTableWidgetItem(""));
+        else
+            ui->keysWidget->setItem(idx, 1, new QTableWidgetItem(text));
+
         ui->keysWidget->setItem(idx, 2, new QTableWidgetItem(QString::number(code)));
     }
     ui->keysWidget->item(idx, 3)->setCheckState(ctrl ? Qt::Checked : Qt::Unchecked);
@@ -216,14 +262,34 @@ void KeyDisplayForm::addCheck(int row, int col, bool val)
     ui->keysWidget->setItem(row, col, item);
 }
 
+void KeyDisplayForm::clearTable()
+{
+    int rowCount = ui->keysWidget->rowCount();
+
+    for (int i = 0; i < rowCount; i++)
+    {
+        ui->keysWidget->item(i, 1)->setText("");
+        ui->keysWidget->item(i, 2)->setText("0");
+
+        for (int j = 3; j <= 10; j++)
+        {
+            ui->keysWidget->item(i, j)->setCheckState(Qt::Unchecked);
+        }
+    }
+}
 
 void KeyDisplayForm::dropKeysInit(void)
 {
+    ui->dropKeys->addItem("CLEAR", 0);
+
+    // offset ascii charset from the key definition
+    // a-z
     for (int i = 97; i <= 122; i++)
     {
         ui->dropKeys->addItem(QString((char)i), KEY_A+i-97);
     }
 
+    // 1 - 9
     for (int i = 49; i <= 57; i++)
     {
         ui->dropKeys->addItem(QString((char)i), KEY_1+i-49);
@@ -249,6 +315,7 @@ void KeyDisplayForm::dropKeysInit(void)
     ui->dropKeys->addItem("/", KEY_SLASH);
     ui->dropKeys->addItem("Caps", KEY_CAPS_LOCK);
 
+    // do the F keys
     for (int i = 58; i <= 69; i++)
     {
         ui->dropKeys->addItem(QString("F%1").arg(i-57), KEY_F1 + i - 58);
@@ -274,13 +341,22 @@ void KeyDisplayForm::dropKeysInit(void)
     ui->dropKeys->addItem("Keypad +", KEYPAD_PLUS);
     ui->dropKeys->addItem("Keypad Enter", KEYPAD_ENTER);
 
+    // the keypack numbers 1 - 9
     for (int i = 89; i <= 97; i++)
     {
-      ui->dropKeys->addItem(QString("Keypad %1").arg(i-88), KEY_F1 + i - 89);
+      ui->dropKeys->addItem(QString("Keypad %1").arg(i-88), KEYPAD_1 + i - 89);
     }
     ui->dropKeys->addItem("Keypad 0", KEYPAD_0);
 
     ui->dropKeys->addItem("Keypad .", KEYPAD_PERIOD);
+}
+
+void KeyDisplayForm::propertyChanged()
+{
+    if (updatingIndex == -1)
+        return;
+
+    updateItem();
 }
 
 bool KeyDisplayForm::isBitSet(char val, int bit)

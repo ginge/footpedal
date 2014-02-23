@@ -45,6 +45,8 @@ private slots:
     void addToTable();
     void updateItem();
     void cellClicked(int row, int col);
+    void clearTable();
+    void propertyChanged();
 
 private:
     Ui::KeyDisplayForm *ui;

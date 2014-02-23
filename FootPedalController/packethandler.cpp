@@ -62,7 +62,7 @@ void PacketHandler::buildPacket(DataPacket *packet, char data) {
         }
         return;
     }
-    packet->buffer[packet->bytesReceived] = data;
+    packet->buffer[packet->bytesReceived] = (unsigned char)data;
 
     packet->bytesReceived++;
 
@@ -85,7 +85,8 @@ void PacketHandler::buildPacket(DataPacket *packet, char data) {
 
 void PacketHandler::processReceivedPacket(DataPacket *packet)
 {
-    switch (packet->command) {
+    switch (packet->command)
+    {
     case CMD_CONFIGURE_GET_KEYS_PRESS:
         // device is returning some key information
         emit gotKeyConfig(packet->payload, packet->payloadExtra);
@@ -104,6 +105,12 @@ void PacketHandler::processReceivedPacket(DataPacket *packet)
         break;
     case CMD_CONFIGURE_DEBUG_MSG: // we are getting an incoming string message after this. we then wait for \r\n
         receivingString = true;
+        break;
+    case CMD_GET_ID:
+        emit gotDeviceID(packet->payload);
+        break;
+    case CMD_GET_BUT_CMD:
+        emit gotButtonMode(packet->payload);
         break;
     default:
         break;
@@ -127,9 +134,25 @@ void PacketHandler::sendPacket(DataPacket *packet)
     emit sendSerial(QByteArray(tpacket, sizeof(tpacket)));
 }
 
+DataPacket *PacketHandler::sendPacket(int toNode, int fromNode, int command, int payload, int payloadExtra)
+{
+    DataPacket *p = new DataPacket();
 
-int PacketHandler::arrToValue16(char *buffer, int offset) {
-  int val = 0;
+    p->nodeID = toNode;
+    p->sourceID = fromNode;
+    p->command = command;
+    p->payload = payload;
+    p->payloadExtra = payloadExtra;
+
+    sendPacket(p);
+
+    return p;
+}
+
+
+
+u_int16_t PacketHandler::arrToValue16(unsigned char *buffer, int offset) {
+  u_int16_t val = 0;
   val |= buffer[offset];
   val = val << 8;
   val |= buffer[offset+1];

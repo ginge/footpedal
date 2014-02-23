@@ -51,7 +51,9 @@ enum COMMANDS {
   CMD_CONFIGURE_BUT_KEY_RELEASE,
   CMD_CONFIGURE_BUT_MODIFIER_RELEASE,
   CMD_CONFIGURE_POT_CMD,
-  CMD_CONFIGURE_GET_KEYS_PRESS=50,
+  CMD_GET_ID = 50,
+  CMD_GET_BUT_CMD,
+  CMD_CONFIGURE_GET_KEYS_PRESS,
   CMD_CONFIGURE_GET_MODIFIERS_PRESS,
   CMD_CONFIGURE_GET_KEYS_RELEASE,
   CMD_CONFIGURE_GET_MODIFIERS_RELEASE,
@@ -81,11 +83,16 @@ DataPacket packetSerial1;
 DataPacket packetSerial2;
 DataPacket packetSerialUSB;
 
+#define ID_UNCONFIGURED_SLAVE 252
+#define ID_BROADCAST_CHAIN1  253
+#define ID_BROADCAST_CHAIN2  254
+#define ID_BROADCAST_BOTH 255
+
 // Configuration stuff
 #define MAX_KEY_SEQ 10
 
 struct {
-  byte ID               = 1; // 255 is reserved
+  byte ID               = ID_UNCONFIGURED_SLAVE; // 255 is reserved for broadcast, 252 is a placeholder
   // change these lines below to have hard coded default key presses
   byte keyboardKeysPress[MAX_KEY_SEQ]        = {KEY_HOME, KEY_C, KEY_DELETE, KEY_V, 0};
   byte keyboardModifiersPress[MAX_KEY_SEQ]   = {KEY_LEFT_SHIFT, KEY_LEFT_CTRL, 0, KEY_LEFT_CTRL, 0};
@@ -100,7 +107,7 @@ struct {
 // prototypes
 void parseSerial(DataPacket *packet, byte data);
 void sendDataType(DataPacket *packet);
-void serialRelay(DataPacket *packet);
+void serialRelay(int destinationChain, DataPacket *packet);
 void packetSend(DataPacket *packet, HardwareSerial *port);
 void USBSend(DataPacket *packet);
 void processOwnCommand(DataPacket *packet);
@@ -109,23 +116,7 @@ void saveEEPROM();
 // go go go
 void setup() {
 
-  // load eeprom settings  
-  for (int i = 0; i < MAX_KEY_SEQ; i++) {
-    // read the keypress contents in
-    Conf.keyboardKeysPress[i] = EEPROM.read(i);
-  }
-  for (int i = MAX_KEY_SEQ; i < 2*MAX_KEY_SEQ; i++) {
-    // read the keypress contents in
-    Conf.keyboardModifiersPress[i-MAX_KEY_SEQ-1] = EEPROM.read(i);
-  }
-  for (int i = 2*MAX_KEY_SEQ; i < 3*MAX_KEY_SEQ; i++) {
-    // read the keypress contents in
-    Conf.keyboardKeysRelease[i-2*MAX_KEY_SEQ-1] = EEPROM.read(i);
-  }
-  for (int i = 3*MAX_KEY_SEQ; i < 4*MAX_KEY_SEQ; i++) {
-    // read the keypress contents in
-    Conf.keyboardModifiersRelease[i-3*MAX_KEY_SEQ-1] = EEPROM.read(i);
-  }
+  readEEPROM();
   
   // Setup the USB Serial
   Serial.begin(9600);
@@ -153,8 +144,6 @@ void setup() {
   
   // initialise control over the keyboard:
   Keyboard.begin();
-  
-  Serial.println("HeadFuzz FuzzPedal initialised");
 }
 
 void loop() {
@@ -244,7 +233,6 @@ void checkSerial() {
     parseSerial(&packetSerial2, ch);
   }
   
-  
   // check the host USB interface has any data for us
   if (Serial.available() > 0) {
     ch = Serial.read();
@@ -269,17 +257,27 @@ void parseSerial(DataPacket *packet, byte data) {
     packet->payload = packetToValue16(packet->buffer, DATA_LOC_0);
     packet->payloadExtra = packetToValue16(packet->buffer, DATA_LOC_A);
   
-    // node is set to go to the USB host interface
-    if (packet->nodeID == 0) {
-      sendDataType(packet);
+    if (packet->nodeID == ID_BROADCAST_BOTH ||
+        packet->nodeID == ID_BROADCAST_CHAIN1 ||
+        packet->nodeID == ID_BROADCAST_CHAIN2) {
+      // this is a broadcast packet. we process and send this on regardless
+      // It matched our ID! process it
+      processOwnCommand(packet);
+      // send the packet out the other Serial port(s)
+      serialRelay(packet->nodeID, packet);
     }
     else if (packet->nodeID == Conf.ID) {
-      // It matched our ID! process it
+      // It matched our ID! process it!
+      
+      // NOTE:
+      // 252 is used as a placeholder for the device ID. When a new slave is enabled, it
+      // will have ID 252. The host will then scan, get the first 252 on the chain, and
+      // then configure it.
       processOwnCommand(packet);
     }
     else {
-      // send the packet out the other Serial port
-      serialRelay(packet);
+      // send the packet out the other Serial port and USB
+      serialRelay(ID_BROADCAST_BOTH, packet);
     }
 
     packet->bytesReceived = 0;
@@ -306,52 +304,42 @@ void processOwnCommand(DataPacket *packet) {
       break;
     case CMD_CONFIGURE_ID:
       Conf.ID = (int)(packet->payload);
+      debugPrint("ID Updated");
       break;
-
     case CMD_CONFIGURE_POT_CMD:
+      break;
+    // now the getters
+    case CMD_GET_ID:
+      sendSerialData(packet->port, packet->sourceID, Conf.ID, CMD_GET_ID, Conf.ID, 0);
+      debugPrint("Retured Device ID");
       break;
     case CMD_CONFIGURE_GET_KEYS_PRESS:
       for (int n = 0; n < MAX_KEY_SEQ; n++) {
-         DataPacket packet;
-         packet.command = CMD_CONFIGURE_GET_KEYS_PRESS;
-         packet.payload = n;
-         packet.payloadExtra = Conf.keyboardKeysPress[n];
-         USBSend(&packet);
+         sendSerialData(packet->port, packet->sourceID, Conf.ID, CMD_CONFIGURE_GET_KEYS_PRESS, n, Conf.keyboardKeysPress[n]);
       }
       debugPrint("Stored Press Key Sent");
       break;
     case CMD_CONFIGURE_GET_MODIFIERS_PRESS:
       for (int n = 0; n < MAX_KEY_SEQ; n++) {
-         DataPacket packet;
-         packet.command = CMD_CONFIGURE_GET_MODIFIERS_PRESS;
-         packet.payload = n;
-         packet.payloadExtra = Conf.keyboardModifiersPress[n];
-         USBSend(&packet);
+         sendSerialData(packet->port, packet->sourceID, Conf.ID, CMD_CONFIGURE_GET_MODIFIERS_PRESS, n, Conf.keyboardModifiersPress[n]);
       }
       debugPrint("Stored Press Modifiers Sent");
       break;
     case CMD_CONFIGURE_GET_KEYS_RELEASE:
       for (int n = 0; n < MAX_KEY_SEQ; n++) {
-         DataPacket packet;
-         packet.command = CMD_CONFIGURE_GET_KEYS_RELEASE;
-         packet.payload = n;
-         packet.payloadExtra = Conf.keyboardKeysRelease[n];
-         USBSend(&packet);
+         sendSerialData(packet->port, packet->sourceID, Conf.ID, CMD_CONFIGURE_GET_KEYS_RELEASE, n, Conf.keyboardKeysRelease[n]);
       }
       debugPrint("Stored Release Key Sent");
       break;
     case CMD_CONFIGURE_GET_MODIFIERS_RELEASE:
       for (int n = 0; n < MAX_KEY_SEQ; n++) {
-         DataPacket packet;
-         packet.command = CMD_CONFIGURE_GET_MODIFIERS_RELEASE;
-         packet.payload = n;
-         packet.payloadExtra = Conf.keyboardModifiersRelease[n];
-         USBSend(&packet);
+         sendSerialData(packet->port, packet->sourceID, Conf.ID, CMD_CONFIGURE_GET_MODIFIERS_RELEASE, n, Conf.keyboardModifiersRelease[n]);
       }
       debugPrint("Stored Release Modifiers Sent");
       break;
     case CMD_CONFIGURE_SAVE:
       saveEEPROM();
+      debugPrint("Saved Settings");
       break;
   }
 }
@@ -413,18 +401,48 @@ void sendDataType(DataPacket *packet) {
 }
 
 // send the packet to the other serial port(s)
-void serialRelay(DataPacket *packet) {
-  if (packet->port == PORT_SER1) {
-    packetSend(packet, &Serial2);
-  }
-  else if (packet->port == PORT_SER2) {
-    packetSend(packet, &Serial1);
-  }
-  else if (packet->port == PORT_USB) {
-    // if it comes from the USB host, send to both serial ports.
-    // just in case we have chained devices on both sides
-    packetSend(packet, &Serial1);
-    packetSend(packet, &Serial2);
+void serialRelay(int destinationChain, DataPacket *packet) {
+  // see where the packet came from.
+  // if it comes from the USB host, send to both serial ports.
+  // just in case we have chained devices on both sides
+  // if it comes from one of the serial ports, we send it t the other
+  // and/or USB port
+  switch (destinationChain) {
+    case ID_BROADCAST_BOTH:
+      if (packet->port == PORT_SER1) { // we can't broadcast back to origin chain!
+        packetSend(packet, &Serial2);
+        USBSend(packet);
+        debugPrint("Relayed broadcast from Chain 1 to USB + Chain 2");
+      }
+      else if (packet->port == PORT_SER2) { // we can't broadcast back to origin chain!
+        packetSend(packet, &Serial1);
+        USBSend(packet);
+        debugPrint("Relayed broadcast from Chain 2 to USB + Chain 1");
+      }
+      else if (packet->port == PORT_USB && packet->nodeID == 0) { // it came from USB, and is destined for usb
+        debugPrint("Relayed broadcast USB back to USB");
+        USBSend(packet);
+      }
+      else {  // it must have come from the USB so relay over serial
+        packetSend(packet, &Serial1);
+        packetSend(packet, &Serial2);
+        debugPrint("Relayed broadcast from USB to Chain 1 + Chain 2");
+      }
+      break;
+   case ID_BROADCAST_CHAIN1:
+      if (packet->port != PORT_SER1) { // we can't broadcast back to origin chain!
+        packetSend(packet, &Serial1);
+        debugPrint("Relayed Chain 1 Broadcast from Any to Chain 2");
+      }
+      break;
+   case ID_BROADCAST_CHAIN2:
+      if (packet->port != PORT_SER2) { // we can't broadcast back to origin chain!
+        packetSend(packet, &Serial2);
+        debugPrint("Relayed Chain 2 Broadcast from Any to Chain 1");
+      }
+      break;
+   default:
+      break;
   }
 }
 
@@ -435,6 +453,19 @@ int packetToValue16(byte *buffer, int offset) {
   val |= buffer[offset+1];
   
   return val;
+}
+
+void sendSerialData(int port, byte nodeTo, byte nodeFrom, byte command, int payload, int payloadExtra)
+{
+  DataPacket packet;
+  packet.port = port;
+  packet.nodeID = nodeTo;
+  packet.sourceID = nodeFrom;
+  packet.command = command;
+  packet.payload = payload;
+  packet.payloadExtra = payloadExtra;
+  // send the new packet out over the relevant port
+  serialRelay(ID_BROADCAST_BOTH, &packet);
 }
 
 void packetSend(DataPacket *packet, HardwareSerial *port) {
@@ -506,3 +537,29 @@ void saveEEPROM() {
   EEPROM.write((4*MAX_KEY_SEQ)+1, Conf.buttonCommand);
 }
 
+void readEEPROM()
+{
+  
+  // load eeprom settings  
+  for (int i = 0; i < MAX_KEY_SEQ; i++) {
+    // read the keypress contents in
+    Conf.keyboardKeysPress[i] = EEPROM.read(i);
+  }
+  for (int i = MAX_KEY_SEQ; i < 2*MAX_KEY_SEQ; i++) {
+    // read the keypress contents in
+    Conf.keyboardModifiersPress[i-MAX_KEY_SEQ-1] = EEPROM.read(i);
+  }
+  for (int i = 2*MAX_KEY_SEQ; i < 3*MAX_KEY_SEQ; i++) {
+    // read the keypress contents in
+    Conf.keyboardKeysRelease[i-2*MAX_KEY_SEQ-1] = EEPROM.read(i);
+  }
+  for (int i = 3*MAX_KEY_SEQ; i < 4*MAX_KEY_SEQ; i++) {
+    // read the keypress contents in
+    Conf.keyboardModifiersRelease[i-3*MAX_KEY_SEQ-1] = EEPROM.read(i);
+  }
+  // get ID
+  Conf.ID =  EEPROM.read(4*MAX_KEY_SEQ);
+  
+  // get button command
+  Conf.buttonCommand = EEPROM.read((4*MAX_KEY_SEQ)+1);
+}

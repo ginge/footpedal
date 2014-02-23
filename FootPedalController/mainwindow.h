@@ -23,6 +23,7 @@
 #include <QMainWindow>
 #include <QtSerialPort>
 #include <QtSerialPort/QSerialPortInfo>
+#include <QListWidgetItem>
 #include "packethandler.h"
 
 namespace Ui {
@@ -51,12 +52,18 @@ private slots:
     void loadKeys();
     void saveKeys();
     void incomingDebug(QString message);
+    void commandModeChanged(int index);
+    void deviceSelected(QString device);
+    void scanDevices();
+    void devicesScanned();
 
     // from the parser module
     void gotKey(int idx, char key);
     void gotModifier(int idx, char mod);
     void gotReleaseKey(int idx, char key);
     void gotReleaseModifier(int idx, char mod);
+    void gotDeviceID(unsigned int id);
+    void gotButtonMode(unsigned int id);
 
 private:
     Ui::MainWindow *ui;
@@ -65,11 +72,16 @@ private:
     void setControlsEnabled(bool enable);
     void sendPacket(char destNode, char srcNode, char command, int data0, int data1);
     void sendKeys(QMap<int, char> keys, int command);
+    QListWidgetItem* getCurrentItem();
+    void scanDevices(bool allChains);
 
     PacketHandler *packetHandler;
 
     KeyDisplayForm *pressButtonWidget;
     KeyDisplayForm *releaseButtonWidget;
+
+
+    bool secondPass;
 };
 
 #endif // MAINWINDOW_H

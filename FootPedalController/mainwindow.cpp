@@ -65,17 +65,22 @@ MainWindow::MainWindow(QWidget *parent) :
     // do QT signals and slots
     connect(ui->btnConnect, SIGNAL(clicked()), this, SLOT(openSerialPort()));
     connect(ui->edtText, SIGNAL(returnPressed()), this, SLOT(sendSerial()));
+    connect(ui->btnLoadKeys, SIGNAL(clicked()), this, SLOT(loadKeys()));
+    connect(ui->btnSaveKeys, SIGNAL(clicked()), this, SLOT(saveKeys()));
+    connect(ui->listDevices, SIGNAL(currentTextChanged(QString)), this, SLOT(deviceSelected(QString)));
+    connect(ui->dropCmdType, SIGNAL(currentIndexChanged(int)), this, SLOT(commandModeChanged(int)));
+    connect(ui->btnScan, SIGNAL(clicked()), this, SLOT(scanDevices()));
     connect(serial, SIGNAL(error(QSerialPort::SerialPortError)), this, SLOT(handleError(QSerialPort::SerialPortError)));
     connect(serial, SIGNAL(readyRead()), this, SLOT(readData()));
     connect(console, SIGNAL(getData(QByteArray)), this, SLOT(writeData(QByteArray)));
-    connect(ui->btnLoadKeys, SIGNAL(clicked()), this, SLOT(loadKeys()));
-    connect(ui->btnSaveKeys, SIGNAL(clicked()), this, SLOT(saveKeys()));
     connect(packetHandler, SIGNAL(sendSerial(QByteArray)), this, SLOT(writeData(QByteArray)));
     connect(packetHandler, SIGNAL(gotDebugMessage(QString)), this, SLOT(incomingDebug(QString)));
     connect(packetHandler, SIGNAL(gotKeyConfig(int,char)), this, SLOT(gotKey(int,char)));
     connect(packetHandler, SIGNAL(gotModifierConfig(int,char)), this, SLOT(gotModifier(int,char)));
     connect(packetHandler, SIGNAL(gotKeyReleaseConfig(int,char)), this, SLOT(gotReleaseKey(int,char)));
     connect(packetHandler, SIGNAL(gotModifierReleaseConfig(int,char)), this, SLOT(gotReleaseModifier(int,char)));
+    connect(packetHandler, SIGNAL(gotDeviceID(unsigned int)), this, SLOT(gotDeviceID(unsigned int)));
+    connect(packetHandler, SIGNAL(gotButtonMode(unsigned int)), this, SLOT(gotButtonMode(unsigned int)));
 }
 
 
@@ -87,61 +92,199 @@ MainWindow::~MainWindow()
 }
 
 
+void MainWindow::scanDevices()
+{
+    secondPass = false;
+
+    scanDevices(false);
+}
+
+void MainWindow::scanDevices(bool allChains)
+{
+    int chain = (allChains ? ID_BROADCAST_BOTH : ID_BROADCAST_CHAIN1);
+
+    // scan for all devices on this pedals serial bus
+
+    ui->listDevices->clear();
+
+    // ask each chain for the id. This is to make sure there are no devices
+    // awaiting an ID. If we did both chains
+    packetHandler->sendPacket(chain, 0, CMD_GET_ID, 0, 0);
+
+    // wait some time for the devices to roll in
+    QTimer::singleShot(200, this, SLOT(devicesScanned()));
+}
+
+void MainWindow::gotDeviceID(unsigned int id)
+{
+
+    ui->listDevices->addItem(new QListWidgetItem(QString::number(id)));
+}
+
+void MainWindow::gotButtonMode(unsigned int id)
+{
+    switch (id)
+    {
+    case CMD_BUTTON1:
+        ui->dropCmdType->setCurrentIndex(0);
+        break;
+    case CMD_BUTTON_ON_PRESS:
+        ui->dropCmdType->setCurrentIndex(1);
+        break;
+    case CMD_SERIAL_USB:
+        ui->dropCmdType->setCurrentIndex(2);
+        break;
+    }
+}
+
+void MainWindow::devicesScanned()
+{
+    int highestID = 0;
+    bool devicesModified = false;
+    QMap<int,int> items;
+
+    //get the highest ID
+    for (int i = 0; i < ui->listDevices->count(); i++)
+    {
+        int id = ui->listDevices->item(i)->text().toInt();
+
+        if (!items.contains(id))
+        {
+            // we have a duplicate! deal with this!
+            items[id] = id;
+        }
+
+    }
+
+    // look for unprogrammed devices
+    for (int i = 0; i < ui->listDevices->count(); i++)
+    {
+        int id = ui->listDevices->item(i)->text().toInt();
+
+        if (id == ID_UNCONFIGURED_SLAVE)
+        {
+            // device is unprogrammed. Set its ID
+            packetHandler->sendPacket(ID_UNCONFIGURED_SLAVE, 0, CMD_CONFIGURE_ID, highestID + 1, 0);
+
+            devicesModified = true;
+        }
+    }
+
+    if (!secondPass)
+    {
+        scanDevices(true);
+        secondPass = true;
+        return;
+    }
+
+    // rescan if we changed anything
+    if (devicesModified == true)
+    {
+        scanDevices();
+    }
+    else
+    {
+        if (ui->listDevices->count() > 0)
+        {
+            QListWidgetItem *firstitem = ui->listDevices->item(0);
+            firstitem->setSelected(true);
+            ui->spinDevID->setValue(firstitem->text().toInt());
+        }
+        loadKeys();
+        setControlsEnabled(true);
+
+    }
+}
+
+QListWidgetItem* MainWindow::getCurrentItem()
+{
+    QList<QListWidgetItem*> l = ui->listDevices->selectedItems();
+    if ( ! l.empty()) {
+        return l.at(0);
+    }
+
+    return NULL;
+}
 
 void MainWindow::loadKeys()
 {
+    QListWidgetItem *currentItem = getCurrentItem();
+
+    if (currentItem == NULL)
+        return;
+
     //tell the serial to get the configuration for the USB master device
-    DataPacket p;
-    p.nodeID = 1;
-    p.sourceID = 0;
-    p.command = CMD_CONFIGURE_GET_KEYS_PRESS;
-    p.payload = 0;
-    p.payloadExtra = 0;
-    packetHandler->sendPacket(&p);
+    DataPacket *p = packetHandler->sendPacket(currentItem->text().toInt(), 0, CMD_CONFIGURE_GET_KEYS_PRESS, 0, 0);
 
     // ask for the modifiers
-    p.command = CMD_CONFIGURE_GET_MODIFIERS_PRESS;
-    packetHandler->sendPacket(&p);
+    p->command = CMD_CONFIGURE_GET_MODIFIERS_PRESS;
+    packetHandler->sendPacket(p);
 
     // now the same but on release
-    p.command = CMD_CONFIGURE_GET_KEYS_RELEASE;
-    packetHandler->sendPacket(&p);
+    p->command = CMD_CONFIGURE_GET_KEYS_RELEASE;
+    packetHandler->sendPacket(p);
 
     // now the same but on release
-    p.command = CMD_CONFIGURE_GET_MODIFIERS_RELEASE;
-    packetHandler->sendPacket(&p);
+    p->command = CMD_CONFIGURE_GET_MODIFIERS_RELEASE;
+    packetHandler->sendPacket(p);
+
+    // ask for the command mode
+    p->command = CMD_GET_BUT_CMD;
+    packetHandler->sendPacket(p);
 }
 
 void MainWindow::saveKeys()
 {
+    QListWidgetItem *currentItem = getCurrentItem();
+
+    if (currentItem == NULL)
+        return;
+
     sendKeys(pressButtonWidget->getKeys(), CMD_CONFIGURE_BUT_KEY_PRESS);
     sendKeys(pressButtonWidget->getModifiers(), CMD_CONFIGURE_BUT_MODIFIER_PRESS);
     sendKeys(releaseButtonWidget->getKeys(), CMD_CONFIGURE_BUT_KEY_RELEASE);
     sendKeys(releaseButtonWidget->getModifiers(), CMD_CONFIGURE_BUT_MODIFIER_RELEASE);
 
-    // send eeprom save
-    DataPacket p;
-    p.nodeID = 1;
-    p.sourceID = 0;
-    p.command = CMD_CONFIGURE_SAVE;
-    p.payload = 0;
-    p.payloadExtra = 0;
-    packetHandler->sendPacket(&p);
+    // send new device ID
+    packetHandler->sendPacket(currentItem->text().toInt(), 0, CMD_CONFIGURE_ID, ui->spinDevID->value(), 0);
+
+    // LAST: send eeprom save
+    packetHandler->sendPacket(currentItem->text().toInt(), 0, CMD_CONFIGURE_SAVE, 0, 0);
+
+    // force a rescan
+    scanDevices();
 }
 
 void MainWindow::sendKeys(QMap<int, char> keys, int command)
 {
+    QListWidgetItem *currentItem = getCurrentItem();
+
+    if (currentItem == NULL)
+        return;
+
     // send each key to the board
     foreach( int k, keys.keys())
     {
-        DataPacket p;
-        p.nodeID = 1;
-        p.sourceID = 0;
-        p.command = command;
-        p.payload = k;
-        p.payloadExtra = (char)keys.value(k);
-        packetHandler->sendPacket(&p);
+        packetHandler->sendPacket(currentItem->text().toInt(), 0, command, k, (char)keys.value(k));
     }
+}
+
+void MainWindow::commandModeChanged(int index)
+{
+    QListWidgetItem *currentItem = getCurrentItem();
+
+    if (currentItem == NULL)
+        return;
+
+    QVariant val = ui->dropCmdType->itemData(index);
+
+    packetHandler->sendPacket(currentItem->text().toInt(), 0, CMD_CONFIGURE_BUT_CMD, val.toUInt(), 0);
+}
+
+void MainWindow::deviceSelected(QString device)
+{
+    setControlsEnabled(true);
+
 }
 
 void MainWindow::gotKey(int idx, char key)
@@ -156,8 +299,6 @@ void MainWindow::gotReleaseKey(int idx, char key)
 
 void MainWindow::gotModifier(int idx, char mod)
 {
-    qDebug() << "Got a MOD! idx" << idx << " mod " << mod;
-
     pressButtonWidget->addModifier(idx, mod);
 }
 
@@ -193,7 +334,8 @@ void MainWindow::openSerialPort()
             console->setEnabled(true);
             console->setLocalEchoEnabled(true);
             ui->statusBar->showMessage(tr("Connected"));
-
+            scanDevices();
+            setControlsEnabled(true);
         } else {
             serial->close();
             QMessageBox::critical(this, tr("Error"), serial->errorString());
@@ -239,8 +381,11 @@ void MainWindow::handleError(QSerialPort::SerialPortError error)
 
 void MainWindow::setControlsEnabled(bool enable)
 {
-    //runButton->setEnabled(enable);
-    //serialPortComboBox->setEnabled(enable);
-    //waitResponseSpinBox->setEnabled(enable);
-    //requestLineEdit->setEnabled(enable);
+    if (ui->listDevices->count() > 0)
+    {
+        ui->keyFrame->setEnabled(enable);
+        ui->dropCmdType->setEnabled(enable);
+    }
+    ui->btnScan->setEnabled(enable);
+
 }
