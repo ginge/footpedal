@@ -55,6 +55,7 @@ private slots:
     void commandModeChanged(int index);
     void deviceSelected(QString device);
     void scanDevices();
+    void getPotValue();
     void devicesScanned();
 
     // from the parser module
@@ -64,6 +65,7 @@ private slots:
     void gotReleaseModifier(int idx, char mod);
     void gotDeviceID(unsigned int id);
     void gotButtonMode(unsigned int id);
+    void gotPotValue(unsigned int value);
 
 private:
     Ui::MainWindow *ui;
@@ -82,6 +84,7 @@ private:
 
 
     bool secondPass;
+    QTimer *timer;
 };
 
 #endif // MAINWINDOW_H

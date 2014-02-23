@@ -112,6 +112,12 @@ void PacketHandler::processReceivedPacket(DataPacket *packet)
     case CMD_GET_BUT_CMD:
         emit gotButtonMode(packet->payload);
         break;
+    case CMD_GET_POT_CMD:
+        emit gotPotAxisMode(packet->payload);
+        break;
+    case CMD_GET_POT_VALUE:
+        emit gotPotValue(packet->payload);
+        break;
     default:
         break;
     }
@@ -160,4 +166,10 @@ u_int16_t PacketHandler::arrToValue16(unsigned char *buffer, int offset) {
   return val;
 }
 
+
+//some wrappers
+void PacketHandler::getPotValue(int toNode)
+{
+    sendPacket(toNode, 0, CMD_GET_POT_VALUE, 0, 0);
+}
 

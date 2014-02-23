@@ -51,6 +51,7 @@ enum PacketCommandTypes {
 };
 
 enum PacketCommands {
+    // Configuration section. Devices can send these commands to configure the pedal and keypresses
     CMD_CONFIGURE_ID = 30,
     CMD_CONFIGURE_BUT_CMD,
     CMD_CONFIGURE_BUT_KEY_PRESS,
@@ -60,12 +61,14 @@ enum PacketCommands {
     CMD_CONFIGURE_POT_CMD,
     CMD_GET_ID = 50,
     CMD_GET_BUT_CMD,
+    CMD_GET_POT_CMD,
+    CMD_GET_POT_VALUE,
     CMD_CONFIGURE_GET_KEYS_PRESS,
     CMD_CONFIGURE_GET_MODIFIERS_PRESS,
     CMD_CONFIGURE_GET_KEYS_RELEASE,
     CMD_CONFIGURE_GET_MODIFIERS_RELEASE,
     CMD_CONFIGURE_SAVE,
-    CMD_CONFIGURE_DEBUG_MSG = 70
+    CMD_CONFIGURE_DEBUG_MSG = 70         // Sends a magic packet before sending serial data so the conf app doesn't break
 };
 
 
@@ -93,6 +96,7 @@ public:
     DataPacket *sendPacket(int toNode, int fromNode, int command, int payload, int payloadExtra);
     void buildPacket(DataPacket *packet, char data);
     DataPacket *packetHandle();
+    void getPotValue(int toNode);
 
 signals:
     void sendSerial(const QByteArray &data);
@@ -103,6 +107,8 @@ signals:
     void gotDebugMessage(QString message);
     void gotDeviceID(unsigned int id);
     void gotButtonMode(unsigned int mode);
+    void gotPotAxisMode(unsigned int mode);
+    void gotPotValue(unsigned int value);
 
 private:
     void processReceivedPacket(DataPacket *packet);

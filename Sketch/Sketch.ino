@@ -17,13 +17,21 @@
   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+#include <stdio.h>
 #include <Bounce.h>
 #include <EEPROM.h>
 
-Bounce button11 = Bounce(11, 10);
-Bounce button12 = Bounce(12, 10);
+#define PIN_BUTTON_1  12  // digital 12
+#define PIN_POT_1 0       // analogue 0
 
-#define PACKET_SIZE 7
+//globals
+Bounce button1 = Bounce(PIN_BUTTON_1, 10);
+elapsedMillis elapsedAnalogueReport;
+elapsedMillis elapsedAnalogueRead;
+int potValue = 0;
+
+#define PACKET_TIMEOUT 5000   // ms before we bail on a packet
+#define PACKET_SIZE 7       // number 8 bit elements in the packet
 
 enum PACKET_FORMAT {
   ID_LOC = 0,
@@ -53,6 +61,8 @@ enum COMMANDS {
   CMD_CONFIGURE_POT_CMD,
   CMD_GET_ID = 50,
   CMD_GET_BUT_CMD,
+  CMD_GET_POT_CMD,
+  CMD_GET_POT_VALUE,
   CMD_CONFIGURE_GET_KEYS_PRESS,
   CMD_CONFIGURE_GET_MODIFIERS_PRESS,
   CMD_CONFIGURE_GET_KEYS_RELEASE,
@@ -72,6 +82,7 @@ typedef struct DataPackets {
   byte port;
   byte buffer[PACKET_SIZE];
   byte bytesReceived;
+  elapsedMillis packetRecvTimer;
   byte nodeID;
   byte sourceID;
   byte command;
@@ -83,10 +94,13 @@ DataPacket packetSerial1;
 DataPacket packetSerial2;
 DataPacket packetSerialUSB;
 
-#define ID_UNCONFIGURED_SLAVE 252
-#define ID_BROADCAST_CHAIN1  253
-#define ID_BROADCAST_CHAIN2  254
-#define ID_BROADCAST_BOTH 255
+// types of broadcast IDs
+enum ID_TYPES {
+  ID_UNCONFIGURED_SLAVE = 252,
+  ID_BROADCAST_CHAIN1,
+  ID_BROADCAST_CHAIN2,
+  ID_BROADCAST_BOTH
+};
 
 // Configuration stuff
 #define MAX_KEY_SEQ 10
@@ -100,8 +114,8 @@ struct {
   byte keyboardModifiersRelease[MAX_KEY_SEQ] = {0, 0, 0, 0};
   byte buttonCommand    = CMD_BUTTON1;       // function that is executed on button press
   byte potAxisCommand   = CMD_JOYSTICK_X;
-  int  potSampleFreq    = 10;  //ms
-  int  potReportFreq    = 100;  //ms  
+  int  potSampleFreq    = 100;  //ms
+  int  potReportFreq    = 1000;  //ms  
 } Conf; 
 
 // prototypes
@@ -127,8 +141,7 @@ void setup() {
   Joystick.useManualSend(true);
   
   // Enable pullups on switch inputs
-  pinMode(11, INPUT_PULLUP);  // Not used yet
-  pinMode(12, INPUT_PULLUP);  // Switch connected to here
+  pinMode(PIN_BUTTON_1, INPUT_PULLUP);  // Switch connected to here
 
   // Start hardware serial ports
   Serial1.begin(9600);
@@ -157,17 +170,29 @@ void loop() {
 }
 
 void checkPot() {
-  int potVal = analogRead(0);
   
-  // read 6 analog inputs and use them for the joystick axis
-  //Joystick.X(potVal);
+  // read the pot on the timer schedule
+  if (elapsedAnalogueRead >= Conf.potSampleFreq) {
+    elapsedAnalogueRead = elapsedAnalogueRead - Conf.potSampleFreq;
+    potValue = analogRead(PIN_POT_1);
+  }
 
-  // Because setup configured the Joystick manual send,
-  // the computer does not see any of the changes yet.
-  // This send_now() transmits everything all at once.
-  //Joystick.send_now();
+  if (elapsedAnalogueReport >= Conf.potReportFreq) {
+    elapsedAnalogueReport = elapsedAnalogueReport - Conf.potReportFreq;
+  
+    // send a fake data packet to ourselves for processing
+    DataPacket packet;
+    packet.command = Conf.potAxisCommand;
+    packet.payload = potValue;
+    packet.payloadExtra = 0;
+    sendDataType(&packet);
 
-  //Serial.println(potVal);  
+#if 0
+    char buffer[20];
+    sprintf(buffer, "POT VALUE: %d", potValue);
+    debugPrint(buffer);
+#endif
+  }
 }
 
 void checkButtons() {
@@ -175,16 +200,16 @@ void checkButtons() {
   byte rising = 0;
   
   // read the button states
-  button12.update();
+  button1.update();
    
   // Button Pressed
-  if (button12.fallingEdge()) {
+  if (button1.fallingEdge()) {
     pressed = 1;
     Serial.println("Button Press");
   }
   
   // button released
-  if (button12.risingEdge()) {
+  if (button1.risingEdge()) {
     pressed = 1;
     rising = 1;
     Serial.println("Button Release");
@@ -193,6 +218,9 @@ void checkButtons() {
   if (pressed) {
     // send a fake data packet to ourselves for processing
     DataPacket packet;
+    packet.port = 0;
+    packet.sourceID = Conf.ID;
+    packet.nodeID = 0;
     for (int n=0;n < MAX_KEY_SEQ; n++) {
       if (!rising) {
         packet.command = Conf.buttonCommand;
@@ -243,6 +271,13 @@ void checkSerial() {
 
 // build up a serial packet until we get a complete data packet
 void parseSerial(DataPacket *packet, byte data) {
+  
+  //check for a timeout of a packet
+  if (packet->packetRecvTimer >= PACKET_TIMEOUT) {
+    packet->packetRecvTimer = 0;
+    packet->bytesReceived = 0; // start again
+  }  
+  
   packet->buffer[packet->bytesReceived] = data;
 
   packet->bytesReceived++;
@@ -307,11 +342,22 @@ void processOwnCommand(DataPacket *packet) {
       debugPrint("ID Updated");
       break;
     case CMD_CONFIGURE_POT_CMD:
+      Conf.potAxisCommand = packet->payload;
       break;
+      
     // now the getters
     case CMD_GET_ID:
       sendSerialData(packet->port, packet->sourceID, Conf.ID, CMD_GET_ID, Conf.ID, 0);
       debugPrint("Retured Device ID");
+      break;
+    case CMD_GET_BUT_CMD:
+      sendSerialData(packet->port, packet->sourceID, Conf.ID, CMD_GET_BUT_CMD, Conf.buttonCommand, 0);
+      break;
+    case CMD_GET_POT_CMD:
+      sendSerialData(packet->port, packet->sourceID, Conf.ID, CMD_GET_POT_CMD, Conf.potAxisCommand, 0);
+      break;
+    case CMD_GET_POT_VALUE:
+      sendSerialData(packet->port, packet->sourceID, Conf.ID, CMD_GET_POT_VALUE, potValue, 0);
       break;
     case CMD_CONFIGURE_GET_KEYS_PRESS:
       for (int n = 0; n < MAX_KEY_SEQ; n++) {
@@ -350,12 +396,12 @@ void sendDataType(DataPacket *packet) {
   
   switch (packet->command) {
     case CMD_JOYSTICK_X:
-      //Joystick.X(packet->payload);
-      //Joystick.send_now();
+      Joystick.X(packet->payload);
+      Joystick.send_now();
       break;
     case CMD_JOYSTICK_Y:
-      //Joystick.Y(packet->payload);
-      //Joystick.send_now();
+      Joystick.Y(packet->payload);
+      Joystick.send_now();
       break;
     case CMD_BUTTON1:
       // send any control etc keys too
@@ -476,6 +522,7 @@ void packetSend(DataPacket *packet, HardwareSerial *port) {
   8 bits command
   16 bits command data
   */ 
+  cli();
   port->print(packet->nodeID, BYTE);
   port->print(packet->sourceID, BYTE);
   port->print(packet->command, BYTE);
@@ -485,11 +532,13 @@ void packetSend(DataPacket *packet, HardwareSerial *port) {
   port->print(packet->payloadExtra & 0xFF, BYTE);
 
   port->println();
+  sei();
 }
 
 // annoying we need this, but the HardwareSerial and USBSerial classes are
 // not compatible without lots of code. easier to replicate those few lines
 void USBSend(DataPacket *packet) {
+  cli();
   Serial.print(packet->nodeID, BYTE);
   Serial.print(packet->sourceID, BYTE);
   Serial.print(packet->command, BYTE);
@@ -497,7 +546,7 @@ void USBSend(DataPacket *packet) {
   Serial.print(packet->payload & 0xFF, BYTE);
   Serial.print((packet->payloadExtra >> 8) & 0xFF, BYTE);
   Serial.print(packet->payloadExtra & 0xFF, BYTE);
-
+  sei();
   //Serial.println();  
 }
 

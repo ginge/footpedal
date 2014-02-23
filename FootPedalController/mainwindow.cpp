@@ -81,6 +81,10 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(packetHandler, SIGNAL(gotModifierReleaseConfig(int,char)), this, SLOT(gotReleaseModifier(int,char)));
     connect(packetHandler, SIGNAL(gotDeviceID(unsigned int)), this, SLOT(gotDeviceID(unsigned int)));
     connect(packetHandler, SIGNAL(gotButtonMode(unsigned int)), this, SLOT(gotButtonMode(unsigned int)));
+    connect(packetHandler, SIGNAL(gotPotValue(unsigned int)), this, SLOT(gotPotValue(unsigned int)));
+
+    timer = new QTimer(this);
+    connect(timer, SIGNAL(timeout()), this, SLOT(getPotValue()));
 }
 
 
@@ -106,6 +110,8 @@ void MainWindow::scanDevices(bool allChains)
     // scan for all devices on this pedals serial bus
 
     ui->listDevices->clear();
+
+    timer->stop();
 
     // ask each chain for the id. This is to make sure there are no devices
     // awaiting an ID. If we did both chains
@@ -135,6 +141,21 @@ void MainWindow::gotButtonMode(unsigned int id)
         ui->dropCmdType->setCurrentIndex(2);
         break;
     }
+}
+
+void MainWindow::getPotValue()
+{
+    QListWidgetItem *currentItem = getCurrentItem();
+
+    if (currentItem == NULL)
+        return;
+
+    packetHandler->getPotValue(currentItem->text().toInt());
+}
+
+void MainWindow::gotPotValue(unsigned int value)
+{
+    ui->statusBar->showMessage("Pot: " + QString::number(value));
 }
 
 void MainWindow::devicesScanned()
@@ -192,7 +213,7 @@ void MainWindow::devicesScanned()
         }
         loadKeys();
         setControlsEnabled(true);
-
+        timer->start(2000);
     }
 }
 
